@@ -9,10 +9,10 @@ import (
 	"net"
 	"testing"
 
-	"github.com/fiorix/go-smpp/smpp/pdu"
-	"github.com/fiorix/go-smpp/smpp/pdu/pdufield"
-	"github.com/fiorix/go-smpp/smpp/pdu/pdutext"
-	"github.com/fiorix/go-smpp/smpp/pdu/pdutlv"
+	"github.com/sinchmarcuslind/go-smpp/smpp/pdu"
+	"github.com/sinchmarcuslind/go-smpp/smpp/pdu/pdufield"
+	"github.com/sinchmarcuslind/go-smpp/smpp/pdu/pdutext"
+	"github.com/sinchmarcuslind/go-smpp/smpp/pdu/pdutlv"
 )
 
 func TestServer(t *testing.T) {
@@ -46,7 +46,8 @@ func TestServer(t *testing.T) {
 		t.Fatalf("unexpected system_id: want smpptest, have %q", id)
 	}
 	// submit_sm
-	p = pdu.NewSubmitSM(nil)
+	var seq uint32 = 0
+	p = pdu.NewSubmitSM(nil, seq)
 	f = p.Fields()
 	f.Set(pdufield.SourceAddr, "foobar")
 	f.Set(pdufield.DestinationAddr, "bozo")
@@ -75,7 +76,7 @@ func TestServer(t *testing.T) {
 		}
 	}
 	// submit_sm + tlv field
-	p = pdu.NewSubmitSM(pdutlv.Fields{ pdutlv.TagReceiptedMessageID: pdutlv.CString("xyz123") })
+	p = pdu.NewSubmitSM(pdutlv.Fields{pdutlv.TagReceiptedMessageID: pdutlv.CString("xyz123")}, 0)
 	f = p.Fields()
 	f.Set(pdufield.SourceAddr, "foobar")
 	f.Set(pdufield.DestinationAddr, "bozo")

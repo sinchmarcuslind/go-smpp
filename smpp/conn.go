@@ -13,7 +13,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/fiorix/go-smpp/smpp/pdu"
+	"github.com/sinchmarcuslind/go-smpp/smpp/pdu"
 )
 
 var (

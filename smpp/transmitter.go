@@ -15,10 +15,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/fiorix/go-smpp/smpp/pdu"
-	"github.com/fiorix/go-smpp/smpp/pdu/pdufield"
-	"github.com/fiorix/go-smpp/smpp/pdu/pdutext"
-	"github.com/fiorix/go-smpp/smpp/pdu/pdutlv"
+	"github.com/sinchmarcuslind/go-smpp/smpp/pdu"
+	"github.com/sinchmarcuslind/go-smpp/smpp/pdu/pdufield"
+	"github.com/sinchmarcuslind/go-smpp/smpp/pdu/pdutext"
+	"github.com/sinchmarcuslind/go-smpp/smpp/pdu/pdutlv"
 )
 
 // ErrMaxWindowSize is returned when an operation (such as Submit) violates
@@ -53,7 +53,7 @@ type Transmitter struct {
 	tx struct {
 		count int32
 		sync.Mutex
-		inflight map[string]chan *tx
+		inflight map[string][]chan *tx
 	}
 }
 
@@ -74,7 +74,7 @@ func (t *Transmitter) Bind() <-chan ConnStatus {
 		return t.cl.Status
 	}
 	t.tx.Lock()
-	t.tx.inflight = make(map[string]chan *tx)
+	t.tx.inflight = make(map[string][]chan *tx)
 	t.tx.Unlock()
 	c := &client{
 		Addr:               t.Addr,
@@ -122,22 +122,27 @@ func (t *Transmitter) handlePDU(f HandlerFunc) {
 		key := p.Header().Key()
 		t.tx.Lock()
 		rc := t.tx.inflight[key]
-		t.tx.Unlock()
-		if rc != nil {
-			rc <- &tx{PDU: p}
+		if len(rc) > 0 {
+			t.tx.inflight[key][0] <- &tx{PDU: p}
+			t.tx.inflight[key] = t.tx.inflight[key][1:]
 		} else if f != nil {
 			f(p)
 		}
+		t.tx.Unlock()
 		if p.Header().ID == pdu.DeliverSMID { // Send DeliverSMResp
 			pResp := pdu.NewDeliverSMRespSeq(p.Header().Seq)
 			t.cl.Write(pResp)
 		}
 	}
 	t.tx.Lock()
-	for _, rc := range t.tx.inflight {
-		rc <- &tx{Err: ErrNotConnected}
+	/*for _, rc := range t.tx.inflight {
+		//local := rc[0]
+		for _, rcE := range rc {
+			rcE <- &tx{Err: ErrNotConnected}
+		}
 	}
 	t.tx.Unlock()
+	*/
 }
 
 // Close implements the ClientConn interface.
@@ -287,11 +292,18 @@ func (t *Transmitter) do(p pdu.Body) (*tx, error) {
 	rc := make(chan *tx, 1)
 	key := p.Header().Key()
 	t.tx.Lock()
-	t.tx.inflight[key] = rc
+	if t.tx.inflight[key] == nil {
+		t.tx.inflight[key] = make([]chan *tx, 1)
+		t.tx.inflight[key][0] = rc
+	} else {
+		t.tx.inflight[key] = append(t.tx.inflight[key], rc)
+	}
 	t.tx.Unlock()
 	defer func() {
 		t.tx.Lock()
-		delete(t.tx.inflight, key)
+		if len(t.tx.inflight[key]) == 0 {
+			delete(t.tx.inflight, key)
+		}
 		t.tx.Unlock()
 	}()
 	err := t.cl.Write(p)
@@ -305,13 +317,14 @@ func (t *Transmitter) do(p pdu.Body) (*tx, error) {
 		}
 		return resp, nil
 	case <-t.cl.respTimeout():
+		fmt.Println("Got a timeout")
 		return nil, ErrTimeout
 	}
 }
 
 // Submit sends a short message and returns and updates the given
 // sm with the response status. It returns the same sm object.
-func (t *Transmitter) Submit(sm *ShortMessage) (*ShortMessage, error) {
+func (t *Transmitter) Submit(sm *ShortMessage, seq uint32) (*ShortMessage, error) {
 	if len(sm.DstList) > 0 || len(sm.DLs) > 0 {
 		// if we have a single destination address add it to the list
 		if sm.Dst != "" {
@@ -320,7 +333,7 @@ func (t *Transmitter) Submit(sm *ShortMessage) (*ShortMessage, error) {
 		p := pdu.NewSubmitMulti(sm.TLVFields)
 		return t.submitMsgMulti(sm, p, uint8(sm.Text.Type()))
 	}
-	p := pdu.NewSubmitSM(sm.TLVFields)
+	p := pdu.NewSubmitSM(sm.TLVFields, seq)
 	return t.submitMsg(sm, p, uint8(sm.Text.Type()))
 }
 
@@ -357,7 +370,7 @@ func (t *Transmitter) SubmitLongMsg(sm *ShortMessage) ([]ShortMessage, error) {
 	UDHHeader[5] = uint8(countParts) // total number of message parts
 	for i := 0; i < countParts; i++ {
 		UDHHeader[6] = uint8(i + 1) // current message part
-		p := pdu.NewSubmitSM(sm.TLVFields)
+		p := pdu.NewSubmitSM(sm.TLVFields, 0)
 		f := p.Fields()
 		f.Set(pdufield.SourceAddr, sm.Src)
 		f.Set(pdufield.DestinationAddr, sm.Dst)

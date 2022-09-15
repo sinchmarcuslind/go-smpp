@@ -5,8 +5,8 @@
 package pdu
 
 import (
-	"github.com/fiorix/go-smpp/smpp/pdu/pdufield"
-	"github.com/fiorix/go-smpp/smpp/pdu/pdutlv"
+	"github.com/sinchmarcuslind/go-smpp/smpp/pdu/pdufield"
+	"github.com/sinchmarcuslind/go-smpp/smpp/pdu/pdutlv"
 )
 
 // PDU Types.
@@ -197,8 +197,9 @@ func newSubmitSM(hdr *Header) *codec {
 }
 
 // NewSubmitSM creates and initializes a new SubmitSM PDU.
-func NewSubmitSM(fields pdutlv.Fields) Body {
+func NewSubmitSM(fields pdutlv.Fields, seq uint32) Body {
 	b := newSubmitSM(&Header{ID: SubmitSMID})
+	b.h.Seq = seq
 	b.init()
 	for tag, value := range fields {
 		b.t.Set(tag, value)

@@ -13,15 +13,17 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/sinchmarcuslind/go-smpp/smpp"
+	"github.com/sinchmarcuslind/go-smpp/smpp/pdu/pdufield"
+	"github.com/sinchmarcuslind/go-smpp/smpp/pdu/pdutext"
 	"github.com/urfave/cli"
-
-	"github.com/fiorix/go-smpp/smpp"
-	"github.com/fiorix/go-smpp/smpp/pdu/pdufield"
-	"github.com/fiorix/go-smpp/smpp/pdu/pdutext"
 )
 
 // Version of smppcli.
@@ -136,6 +138,16 @@ var cmdShortMessage = cli.Command{
 			Usage: "set sm_default_msg_id PDU (optional)",
 			Value: 0,
 		},
+		cli.IntFlag{
+			Name:  "loops",
+			Usage: "",
+			Value: 1,
+		},
+		cli.IntFlag{
+			Name:  "fix-sequence",
+			Usage: "",
+			Value: 0,
+		},
 	},
 	Action: func(c *cli.Context) {
 		if len(c.Args()) < 3 {
@@ -164,27 +176,44 @@ var cmdShortMessage = cli.Command{
 		default:
 			codec = pdutext.Raw(text)
 		}
-		sm, err := tx.Submit(&smpp.ShortMessage{
-			Src:                  sender,
-			Dst:                  recipient,
-			Text:                 codec,
-			Register:             register,
-			ServiceType:          c.String("service-type"),
-			SourceAddrTON:        uint8(c.Int("source-addr-ton")),
-			SourceAddrNPI:        uint8(c.Int("source-addr-npi")),
-			DestAddrTON:          uint8(c.Int("dest-addr-ton")),
-			DestAddrNPI:          uint8(c.Int("dest-addr-npi")),
-			ESMClass:             uint8(c.Int("esm-class")),
-			ProtocolID:           uint8(c.Int("protocol-id")),
-			PriorityFlag:         uint8(c.Int("priority-flag")),
-			ScheduleDeliveryTime: c.String("schedule-delivery-time"),
-			ReplaceIfPresentFlag: uint8(c.Int("replace-if-present-flag")),
-			SMDefaultMsgID:       uint8(c.Int("sm-default-msg-id")),
-		})
-		if err != nil {
-			log.Fatalln("Failed:", err)
+
+		count := c.Int("loops")
+		fixSequence := c.Int("fix-sequence")
+
+		var seq int = 0
+		if fixSequence > 0 {
+			seq = rand.Intn(100000)
 		}
-		log.Printf("Message ID: %q", sm.RespID())
+
+		var wg sync.WaitGroup
+		for i := 0; i < count; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				sm, err := tx.Submit(&smpp.ShortMessage{
+					Src:                  sender,
+					Dst:                  recipient,
+					Text:                 codec,
+					Register:             register,
+					ServiceType:          c.String("service-type"),
+					SourceAddrTON:        uint8(c.Int("source-addr-ton")),
+					SourceAddrNPI:        uint8(c.Int("source-addr-npi")),
+					DestAddrTON:          uint8(c.Int("dest-addr-ton")),
+					DestAddrNPI:          uint8(c.Int("dest-addr-npi")),
+					ESMClass:             uint8(c.Int("esm-class")),
+					ProtocolID:           uint8(c.Int("protocol-id")),
+					PriorityFlag:         uint8(c.Int("priority-flag")),
+					ScheduleDeliveryTime: c.String("schedule-delivery-time"),
+					ReplaceIfPresentFlag: uint8(c.Int("replace-if-present-flag")),
+					SMDefaultMsgID:       uint8(c.Int("sm-default-msg-id")),
+				}, uint32(seq))
+				if err != nil {
+					log.Println("Failed:", err)
+				}
+				log.Printf("Message ID: %q", sm.RespID())
+			}()
+		}
+		wg.Wait()
 	},
 }
 
@@ -221,6 +250,8 @@ func newTransmitter(c *cli.Context) *smpp.Transmitter {
 		User:   os.Getenv("SMPP_USER"),
 		Passwd: os.Getenv("SMPP_PASSWD"),
 	}
+	tx.RespTimeout = 10 * time.Second
+	tx.WindowSize = 100
 	if s := c.GlobalString("user"); s != "" {
 		tx.User = s
 	}
